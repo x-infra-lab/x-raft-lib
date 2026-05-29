@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>io.github.x-infra-lab</groupId>
+        <artifactId>x-raft-lib</artifactId>
+        <version>0.1.0-alpha</version>
+    </parent>
+
+    <artifactId>raft-storage-rocksdb</artifactId>
+    <packaging>jar</packaging>
+
+    <name>x-raft-lib :: storage-rocksdb</name>
+    <description>
+        RocksDB-backed implementation of the raft Storage interface.
+        Atomic Ready-cycle persistence via WriteBatchWithIndex; snapshots
+        stored as a single key (host should checkpoint to a separate
+        RocksDB column family for >GB snapshots).
+    </description>
+
+    <dependencies>
+        <dependency>
+            <groupId>io.github.x-infra-lab</groupId>
+            <artifactId>raft-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.rocksdb</groupId>
+            <artifactId>rocksdbjni</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+
+        <!-- test -->
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>
