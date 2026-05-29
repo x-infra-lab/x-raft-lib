@@ -68,7 +68,7 @@
         <grpc.version>1.62.2</grpc.version>
         <rocksdb.version>9.6.1</rocksdb.version>
         <slf4j.version>2.0.12</slf4j.version>
-        <logback.version>1.5.3</logback.version>
+        <logback.version>1.5.33</logback.version>
         <junit.version>5.10.2</junit.version>
         <assertj.version>3.25.3</assertj.version>
         <jqwik.version>1.9.0</jqwik.version>
