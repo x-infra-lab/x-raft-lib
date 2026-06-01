@@ -79,7 +79,7 @@
         <!-- Test-only: lets netty's SelfSignedCertificate generate certs on
              JDK 15+, where its built-in OpenJDK generator no longer works. -->
         <bouncycastle.version>1.78.1</bouncycastle.version>
-        <spotless.version>2.43.0</spotless.version>
+        <spotless.version>3.6.0</spotless.version>
     </properties>
 
     <dependencyManagement>
