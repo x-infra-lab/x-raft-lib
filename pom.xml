@@ -64,7 +64,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <!-- Aligned across all modules. -->
-        <protobuf.version>4.35.0</protobuf.version>
+        <protobuf.version>4.35.1</protobuf.version>
         <protoc.version>4.35.0</protoc.version>
         <grpc.version>1.81.0</grpc.version>
         <rocksdb.version>10.10.1.1</rocksdb.version>
