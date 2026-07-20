@@ -65,7 +65,7 @@ public final class KvServer implements AutoCloseable {
         }
     }
 
-    public CompletableFuture<byte[]> proposeCommand(KvCommand cmd) {
+    public CompletableFuture<Object> proposeCommand(KvCommand cmd) {
         return raftKvNode.proposeWithFuture(cmd.toByteArray());
     }
 

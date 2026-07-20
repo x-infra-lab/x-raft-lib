@@ -44,29 +44,62 @@ public final class KvStateMachine implements AutoCloseable {
         }
     }
 
-    public byte[] apply(long index, KvCommand cmd) {
-        byte[] prev;
+    /**
+     * Applies a committed command to the store and returns the domain result the
+     * proposing node's future should complete with. The concrete type is chosen
+     * by the op so the RPC layer receives a strongly typed result with no
+     * hand-rolled byte (de)serialization:
+     * <ul>
+     *   <li>{@code PUT_IF_ABSENT} -> {@link PutIfAbsentResult}</li>
+     *   <li>{@code PUT}/{@code DELETE} -> the previous value ({@link String}),
+     *       or {@code null} if the key was absent</li>
+     * </ul>
+     */
+    public Object apply(long index, KvCommand cmd) {
+        Object result;
         try {
             byte[] keyBytes = bytes(cmd.getKey());
             switch (cmd.getOp()) {
                 case PUT -> {
-                    prev = db.get(keyBytes);
+                    result = valueOrNull(db.get(keyBytes));
                     db.put(keyBytes, bytes(cmd.getValue()));
                 }
+                case PUT_IF_ABSENT -> {
+                    byte[] existing = db.get(keyBytes);
+                    if (existing == null) {
+                        db.put(keyBytes, bytes(cmd.getValue()));
+                        result = new PutIfAbsentResult(true, cmd.getValue());
+                    } else {
+                        result = new PutIfAbsentResult(false, str(existing));
+                    }
+                }
                 case DELETE -> {
-                    prev = db.get(keyBytes);
+                    result = valueOrNull(db.get(keyBytes));
                     db.delete(keyBytes);
                 }
-                default -> prev = null;
+                default -> result = null;
             }
         } catch (RocksDBException e) {
             throw new IllegalStateException("apply failed for " + cmd, e);
         }
         appliedIndex = index;
-        return prev != null ? prev : EMPTY_BYTES;
+        return result;
     }
 
-    private static final byte[] EMPTY_BYTES = new byte[0];
+    /**
+     * Outcome of a {@code PUT_IF_ABSENT}: whether the value was stored, together
+     * with the value now associated with the key (the newly stored value when
+     * {@code applied} is true, otherwise the pre-existing value).
+     */
+    public record PutIfAbsentResult(boolean applied, String value) {}
+
+    private static String valueOrNull(byte[] v) {
+        return v == null ? null : str(v);
+    }
+
+    private static String str(byte[] v) {
+        return new String(v, StandardCharsets.UTF_8);
+    }
 
     public Optional<String> get(String key) {
         try {

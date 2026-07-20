@@ -69,7 +69,7 @@ public class RaftKVNode implements AutoCloseable {
 
     private static final int CONF_CHANGE_CTX_HEADER_LEN = 8;
 
-    private final ConcurrentHashMap<Long, CompletableFuture<byte[]>> pendingProposals = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Long, CompletableFuture<Object>> pendingProposals = new ConcurrentHashMap<>();
     private final AtomicLong proposalIdGen = new AtomicLong(0);
 
     private final ConcurrentHashMap<ByteBuffer, CompletableFuture<Void>> pendingReads = new ConcurrentHashMap<>();
@@ -185,9 +185,9 @@ public class RaftKVNode implements AutoCloseable {
         return stateMachine;
     }
 
-    public CompletableFuture<byte[]> proposeWithFuture(byte[] cmdBytes) {
+    public CompletableFuture<Object> proposeWithFuture(byte[] cmdBytes) {
         long proposalId = proposalIdGen.incrementAndGet();
-        CompletableFuture<byte[]> future = new CompletableFuture<>();
+        CompletableFuture<Object> future = new CompletableFuture<>();
         pendingProposals.put(proposalId, future);
 
         byte[] data = TrackedEntry.newBuilder()
@@ -532,9 +532,9 @@ public class RaftKVNode implements AutoCloseable {
             applyKvCommand(e.getIndex(), cmdBytes);
             return;
         }
-        CompletableFuture<byte[]> future = pendingProposals.remove(proposalId);
+        CompletableFuture<Object> future = pendingProposals.remove(proposalId);
         try {
-            byte[] result = applyKvCommand(e.getIndex(), cmdBytes);
+            Object result = applyKvCommand(e.getIndex(), cmdBytes);
             if (future != null) future.complete(result);
         } catch (Exception ex) {
             if (future != null) future.completeExceptionally(ex);
@@ -542,7 +542,7 @@ public class RaftKVNode implements AutoCloseable {
         }
     }
 
-    private byte[] applyKvCommand(long index, byte[] cmdBytes) {
+    private Object applyKvCommand(long index, byte[] cmdBytes) {
         try {
             KvCommand cmd = KvCommand.parseFrom(cmdBytes);
             return stateMachine.apply(index, cmd);

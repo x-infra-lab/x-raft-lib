@@ -14,6 +14,7 @@ option java_multiple_files = true;
 service KvService {
     rpc Get(GetRequest) returns (GetResponse);
     rpc Put(PutRequest) returns (PutResponse);
+    rpc PutIfAbsent(PutIfAbsentRequest) returns (PutIfAbsentResponse);
     rpc Delete(DeleteRequest) returns (DeleteResponse);
 }
 
@@ -32,6 +33,20 @@ message PutRequest {
 }
 
 message PutResponse {}
+
+message PutIfAbsentRequest {
+    string key = 1;
+    string value = 2;
+}
+
+message PutIfAbsentResponse {
+    // True if the key was absent and the value was stored; false if the key
+    // already existed and was left unchanged.
+    bool applied = 1;
+    // The value currently associated with the key: the newly stored value when
+    // applied is true, otherwise the pre-existing value.
+    string value = 2;
+}
 
 message DeleteRequest {
     string key = 1;
@@ -53,6 +68,7 @@ message KvCommand {
     enum Op {
         PUT = 0;
         DELETE = 1;
+        PUT_IF_ABSENT = 2;
     }
     Op op = 1;
     string key = 2;

@@ -14,6 +14,8 @@ import io.github.xinfra.lab.raft.examples.proto.KvCommand;
 import io.github.xinfra.lab.raft.examples.proto.KvServiceGrpc;
 import io.github.xinfra.lab.raft.examples.proto.PutRequest;
 import io.github.xinfra.lab.raft.examples.proto.PutResponse;
+import io.github.xinfra.lab.raft.examples.proto.PutIfAbsentRequest;
+import io.github.xinfra.lab.raft.examples.proto.PutIfAbsentResponse;
 import io.grpc.Metadata;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
@@ -73,6 +75,35 @@ class KvServiceImpl extends KvServiceGrpc.KvServiceImplBase {
                         responseObserver.onError(toGrpcException(ex));
                     } else {
                         responseObserver.onNext(PutResponse.getDefaultInstance());
+                        responseObserver.onCompleted();
+                    }
+                });
+    }
+
+    @Override
+    public void putIfAbsent(PutIfAbsentRequest request, StreamObserver<PutIfAbsentResponse> responseObserver) {
+        try {
+            server.checkLeader();
+        } catch (KvServer.NotLeaderException e) {
+            responseObserver.onError(notLeaderError(e));
+            return;
+        }
+        KvCommand cmd = KvCommand.newBuilder()
+                .setOp(KvCommand.Op.PUT_IF_ABSENT)
+                .setKey(request.getKey())
+                .setValue(request.getValue())
+                .build();
+        server.proposeCommand(cmd)
+                .orTimeout(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .whenComplete((result, ex) -> {
+                    if (ex != null) {
+                        responseObserver.onError(toGrpcException(ex));
+                    } else {
+                        KvStateMachine.PutIfAbsentResult r = (KvStateMachine.PutIfAbsentResult) result;
+                        responseObserver.onNext(PutIfAbsentResponse.newBuilder()
+                                .setApplied(r.applied())
+                                .setValue(r.value())
+                                .build());
                         responseObserver.onCompleted();
                     }
                 });
