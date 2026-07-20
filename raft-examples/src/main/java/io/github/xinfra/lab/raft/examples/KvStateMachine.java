@@ -44,18 +44,29 @@ public final class KvStateMachine implements AutoCloseable {
         }
     }
 
-    public void apply(long index, KvCommand cmd) {
+    public byte[] apply(long index, KvCommand cmd) {
+        byte[] prev;
         try {
+            byte[] keyBytes = bytes(cmd.getKey());
             switch (cmd.getOp()) {
-                case PUT -> db.put(bytes(cmd.getKey()), bytes(cmd.getValue()));
-                case DELETE -> db.delete(bytes(cmd.getKey()));
-                default -> { }
+                case PUT -> {
+                    prev = db.get(keyBytes);
+                    db.put(keyBytes, bytes(cmd.getValue()));
+                }
+                case DELETE -> {
+                    prev = db.get(keyBytes);
+                    db.delete(keyBytes);
+                }
+                default -> prev = null;
             }
         } catch (RocksDBException e) {
             throw new IllegalStateException("apply failed for " + cmd, e);
         }
         appliedIndex = index;
+        return prev != null ? prev : EMPTY_BYTES;
     }
+
+    private static final byte[] EMPTY_BYTES = new byte[0];
 
     public Optional<String> get(String key) {
         try {

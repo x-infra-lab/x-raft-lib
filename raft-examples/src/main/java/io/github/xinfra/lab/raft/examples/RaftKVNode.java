@@ -17,6 +17,7 @@ import io.github.xinfra.lab.raft.Ready;
 import io.github.xinfra.lab.raft.SnapshotStatus;
 import io.github.xinfra.lab.raft.Transport;
 import io.github.xinfra.lab.raft.examples.proto.KvCommand;
+import io.github.xinfra.lab.raft.examples.proto.TrackedEntry;
 import io.github.xinfra.lab.raft.proto.Eraftpb;
 import io.github.xinfra.lab.raft.storage.rocksdb.RocksDbStorage;
 import org.slf4j.Logger;
@@ -68,7 +69,7 @@ public class RaftKVNode implements AutoCloseable {
 
     private static final int CONF_CHANGE_CTX_HEADER_LEN = 8;
 
-    private final ConcurrentHashMap<Long, CompletableFuture<Void>> pendingProposals = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Long, CompletableFuture<byte[]>> pendingProposals = new ConcurrentHashMap<>();
     private final AtomicLong proposalIdGen = new AtomicLong(0);
 
     private final ConcurrentHashMap<ByteBuffer, CompletableFuture<Void>> pendingReads = new ConcurrentHashMap<>();
@@ -78,6 +79,12 @@ public class RaftKVNode implements AutoCloseable {
 
     private final ConcurrentHashMap<Long, CompletableFuture<Eraftpb.ConfState>> pendingConfChanges = new ConcurrentHashMap<>();
     private final AtomicLong confChangeIdGen = new AtomicLong(0);
+
+    // Proposal id of an auto-leave joint change whose enter-joint entry has
+    // applied but whose auto-generated leave-joint entry (which carries an empty
+    // context) has not yet applied. Confined to the single apply thread. 0 means
+    // none pending.
+    private long pendingJointLeaveConfChangeId = 0;
 
     private final CompletableFuture<Void> removedFuture = new CompletableFuture<>();
 
@@ -178,18 +185,16 @@ public class RaftKVNode implements AutoCloseable {
         return stateMachine;
     }
 
-    private static final byte TRACKED_PROPOSAL_TAG = (byte) 0xFF;
-    private static final int TRACKED_HEADER_LEN = 1 + 8; // tag + proposalId
-
-    public CompletableFuture<Void> proposeWithFuture(byte[] cmdBytes) {
+    public CompletableFuture<byte[]> proposeWithFuture(byte[] cmdBytes) {
         long proposalId = proposalIdGen.incrementAndGet();
-        CompletableFuture<Void> future = new CompletableFuture<>();
+        CompletableFuture<byte[]> future = new CompletableFuture<>();
         pendingProposals.put(proposalId, future);
 
-        byte[] data = new byte[TRACKED_HEADER_LEN + cmdBytes.length];
-        data[0] = TRACKED_PROPOSAL_TAG;
-        ByteBuffer.wrap(data, 1, 8).putLong(proposalId);
-        System.arraycopy(cmdBytes, 0, data, TRACKED_HEADER_LEN, cmdBytes.length);
+        byte[] data = TrackedEntry.newBuilder()
+                .setProposalId(proposalId)
+                .setPayload(ByteString.copyFrom(cmdBytes))
+                .build()
+                .toByteArray();
 
         try {
             node.propose(data);
@@ -259,14 +264,6 @@ public class RaftKVNode implements AutoCloseable {
         }
 
         return future;
-    }
-
-    public void propose(byte[] data) throws InterruptedException, RaftException {
-        node.propose(data);
-    }
-
-    public void proposeConfChange(Eraftpb.ConfChangeV2 cc) throws InterruptedException, RaftException {
-        node.proposeConfChange(cc);
     }
 
     public void transferLeader(long lead, long transferee) throws InterruptedException {
@@ -521,28 +518,34 @@ public class RaftKVNode implements AutoCloseable {
     }
 
     private void applyNormalEntry(Eraftpb.Entry e) {
-        byte[] raw = e.getData().toByteArray();
-        if (raw.length > TRACKED_HEADER_LEN && raw[0] == TRACKED_PROPOSAL_TAG) {
-            long proposalId = ByteBuffer.wrap(raw, 1, 8).getLong();
-            byte[] cmdBytes = new byte[raw.length - TRACKED_HEADER_LEN];
-            System.arraycopy(raw, TRACKED_HEADER_LEN, cmdBytes, 0, cmdBytes.length);
-            CompletableFuture<Void> future = pendingProposals.remove(proposalId);
-            try {
-                applyKvCommand(e.getIndex(), cmdBytes);
-                if (future != null) future.complete(null);
-            } catch (Exception ex) {
-                if (future != null) future.completeExceptionally(ex);
-                throw ex;
-            }
+        TrackedEntry tracked;
+        try {
+            tracked = TrackedEntry.parseFrom(e.getData());
+        } catch (InvalidProtocolBufferException ex) {
+            throw new ApplyFailureException(
+                    "FATAL: failed to parse tracked entry at index " + e.getIndex()
+                    + ", state machine may be inconsistent, node must stop", ex);
+        }
+        byte[] cmdBytes = tracked.getPayload().toByteArray();
+        long proposalId = tracked.getProposalId();
+        if (proposalId == 0) {
+            applyKvCommand(e.getIndex(), cmdBytes);
             return;
         }
-        applyKvCommand(e.getIndex(), raw);
+        CompletableFuture<byte[]> future = pendingProposals.remove(proposalId);
+        try {
+            byte[] result = applyKvCommand(e.getIndex(), cmdBytes);
+            if (future != null) future.complete(result);
+        } catch (Exception ex) {
+            if (future != null) future.completeExceptionally(ex);
+            throw ex;
+        }
     }
 
-    private void applyKvCommand(long index, byte[] cmdBytes) {
+    private byte[] applyKvCommand(long index, byte[] cmdBytes) {
         try {
             KvCommand cmd = KvCommand.parseFrom(cmdBytes);
-            stateMachine.apply(index, cmd);
+            return stateMachine.apply(index, cmd);
         } catch (InvalidProtocolBufferException e) {
             throw new ApplyFailureException(
                     "FATAL: failed to parse committed entry at index " + index
@@ -561,7 +564,8 @@ public class RaftKVNode implements AutoCloseable {
         Eraftpb.ConfState cs = node.applyConfChange(v2);
         storage.setConfState(cs);
         updateTransportPeers(v2);
-        completeConfChangeFuture(cc.getContext(), cs);
+        // V1 conf changes are always single-step (never joint) -> complete now.
+        handleConfChangeCompletion(v2, cs);
         checkSelfRemoval(v2, cs);
     }
 
@@ -570,8 +574,62 @@ public class RaftKVNode implements AutoCloseable {
         Eraftpb.ConfState cs = node.applyConfChange(cc);
         storage.setConfState(cs);
         updateTransportPeers(cc);
-        completeConfChangeFuture(cc.getContext(), cs);
+        handleConfChangeCompletion(cc, cs);
         checkSelfRemoval(cc, cs);
+    }
+
+    /**
+     * Completes the pending future for an applied conf change, honoring
+     * joint-consensus two-phase semantics.
+     *
+     * <ul>
+     *   <li><b>Simple single-step change</b> (V1, or V2 with a single change and
+     *       auto transition): the config never enters a joint state, so complete
+     *       immediately with the final ConfState.</li>
+     *   <li><b>Auto-leave joint change</b> (e.g. an atomic 2-change replace): the
+     *       enter-joint entry carries the caller's id but leaves the cluster in a
+     *       transitional joint config; raft then auto-appends a leave-joint entry
+     *       with an <em>empty</em> context. We defer completion, stashing the id
+     *       at enter-joint time and completing only when the leave-joint entry
+     *       applies -- so the caller observes the final configuration (not the
+     *       joint one) and cannot race a follow-up change into a still-joint
+     *       cluster.</li>
+     *   <li><b>Explicit joint</b> (auto_leave=false): enter and leave are two
+     *       independent caller requests, each carrying its own context, so
+     *       complete each after its own apply.</li>
+     * </ul>
+     */
+    private void handleConfChangeCompletion(Eraftpb.ConfChangeV2 applied, Eraftpb.ConfState cs) {
+        boolean isLeaveJoint = applied.getChangesCount() == 0;
+        if (isLeaveJoint) {
+            if (pendingJointLeaveConfChangeId != 0) {
+                // Phase 2 of an auto-leave joint change: the auto-generated
+                // leave-joint entry has no context, so use the stashed id.
+                CompletableFuture<Eraftpb.ConfState> future =
+                        pendingConfChanges.remove(pendingJointLeaveConfChangeId);
+                pendingJointLeaveConfChangeId = 0;
+                if (future != null) future.complete(cs);
+            } else {
+                // Explicit, caller-proposed leave-joint: carries its own id.
+                completeConfChangeFuture(applied.getContext(), cs);
+            }
+            return;
+        }
+
+        boolean enteredAutoLeaveJoint = cs.getVotersOutgoingCount() > 0 && cs.getAutoLeave();
+        if (enteredAutoLeaveJoint) {
+            // Defer until the leave-joint entry applies. The future stays in
+            // pendingConfChanges so a shutdown still fails it via drainPendingFutures.
+            long confChangeId = extractConfChangeId(applied.getContext());
+            if (confChangeId != 0 && pendingConfChanges.containsKey(confChangeId)) {
+                pendingJointLeaveConfChangeId = confChangeId;
+            }
+            return;
+        }
+
+        // Simple single-step change, or explicit-joint enter (whose leave is a
+        // separate request): complete now.
+        completeConfChangeFuture(applied.getContext(), cs);
     }
 
     private void checkSelfRemoval(Eraftpb.ConfChangeV2 cc, Eraftpb.ConfState cs) {
@@ -632,12 +690,17 @@ public class RaftKVNode implements AutoCloseable {
     }
 
     private void completeConfChangeFuture(ByteString context, Eraftpb.ConfState cs) {
-        if (context == null || context.isEmpty() || context.size() < 8) return;
-        long confChangeId = ByteBuffer.wrap(context.toByteArray(), 0, 8).getLong();
+        long confChangeId = extractConfChangeId(context);
+        if (confChangeId == 0) return;
         CompletableFuture<Eraftpb.ConfState> future = pendingConfChanges.remove(confChangeId);
         if (future != null) {
             future.complete(cs);
         }
+    }
+
+    private static long extractConfChangeId(ByteString context) {
+        if (context == null || context.size() < 8) return 0;
+        return ByteBuffer.wrap(context.toByteArray(), 0, 8).getLong();
     }
 
     private void maybeSnapshot(long applied) {

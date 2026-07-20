@@ -58,3 +58,12 @@ message KvCommand {
     string key = 2;
     string value = 3;
 }
+
+// Envelope written into raft log entries. Wraps the state-machine command
+// (a serialized KvCommand) together with a proposal id used to correlate the
+// committed entry back to the waiting CompletableFuture on the proposing node.
+// A proposal_id of 0 means the entry is untracked (no future to complete).
+message TrackedEntry {
+    fixed64 proposal_id = 1;
+    bytes payload = 2;
+}
