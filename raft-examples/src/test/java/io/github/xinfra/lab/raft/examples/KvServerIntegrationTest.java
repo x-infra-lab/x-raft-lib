@@ -291,14 +291,19 @@ class KvServerIntegrationTest {
             servers.add(createServer(replacementId, raftPorts[4], kvPorts[4],
                     replacementPeers, false, snapshotStreaming, asyncStorageWrites));
 
-            Eraftpb.ConfState jointCs = phase11Leader
+            // replaceNode now completes only after the auto-leave-joint entry
+            // applies, so the returned ConfState is the FINAL config (not the
+            // transitional joint one): votersOutgoing is empty and the voter set
+            // already has the replacement swapped in for the victim.
+            Eraftpb.ConfState finalCs = phase11Leader
                     .replaceNode(victimId, replacementId, "localhost:" + raftPorts[4])
                     .get(30, TimeUnit.SECONDS);
 
-            assertThat(jointCs.getVotersOutgoingCount())
-                    .as("enter joint: votersOutgoing must be non-empty").isPositive();
-            assertThat(jointCs.getVotersList()).contains(replacementId);
-            assertThat(jointCs.getVotersOutgoingList()).contains(victimId);
+            assertThat(finalCs.getVotersOutgoingCount())
+                    .as("auto-leave joint: votersOutgoing must be empty").isZero();
+            assertThat(finalCs.getVotersList()).contains(replacementId);
+            assertThat(finalCs.getVotersList()).doesNotContain(victimId);
+            assertThat(finalCs.getVotersCount()).isEqualTo(3);
 
             assertThat(awaitTrue(() -> {
                 var cs = phase11Leader.raftKvNode().storage.initialState().confState();
