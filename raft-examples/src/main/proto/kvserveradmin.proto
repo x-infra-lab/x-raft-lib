@@ -14,6 +14,7 @@ option java_multiple_files = true;
 service KvAdminService {
     rpc AddNode(AddNodeRequest) returns (AddNodeResponse);
     rpc RemoveNode(RemoveNodeRequest) returns (RemoveNodeResponse);
+    rpc ReplaceNode(ReplaceNodeRequest) returns (ReplaceNodeResponse);
     rpc TransferLeader(TransferLeaderRequest) returns (TransferLeaderResponse);
     rpc GetClusterInfo(GetClusterInfoRequest) returns (GetClusterInfoResponse);
 }
@@ -31,6 +32,15 @@ message RemoveNodeRequest {
 }
 
 message RemoveNodeResponse {}
+
+// Atomically removes one node and adds another in a single conf change.
+message ReplaceNodeRequest {
+    uint64 remove_node_id = 1;
+    uint64 add_node_id = 2;
+    string add_address = 3;
+}
+
+message ReplaceNodeResponse {}
 
 message TransferLeaderRequest {
     uint64 transferee = 1;

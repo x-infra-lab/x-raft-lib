@@ -13,6 +13,8 @@ import io.github.xinfra.lab.raft.examples.proto.GetClusterInfoResponse;
 import io.github.xinfra.lab.raft.examples.proto.KvAdminServiceGrpc;
 import io.github.xinfra.lab.raft.examples.proto.RemoveNodeRequest;
 import io.github.xinfra.lab.raft.examples.proto.RemoveNodeResponse;
+import io.github.xinfra.lab.raft.examples.proto.ReplaceNodeRequest;
+import io.github.xinfra.lab.raft.examples.proto.ReplaceNodeResponse;
 import io.github.xinfra.lab.raft.examples.proto.TransferLeaderRequest;
 import io.github.xinfra.lab.raft.examples.proto.TransferLeaderResponse;
 import io.grpc.Metadata;
@@ -66,6 +68,26 @@ class KvAdminServiceImpl extends KvAdminServiceGrpc.KvAdminServiceImplBase {
                         responseObserver.onError(toGrpcException(ex));
                     } else {
                         responseObserver.onNext(RemoveNodeResponse.getDefaultInstance());
+                        responseObserver.onCompleted();
+                    }
+                });
+    }
+
+    @Override
+    public void replaceNode(ReplaceNodeRequest request, StreamObserver<ReplaceNodeResponse> responseObserver) {
+        try {
+            server.checkLeader();
+        } catch (KvServer.NotLeaderException e) {
+            responseObserver.onError(notLeaderError(e));
+            return;
+        }
+        server.replaceNode(request.getRemoveNodeId(), request.getAddNodeId(), request.getAddAddress())
+                .orTimeout(CONF_CHANGE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .whenComplete((cs, ex) -> {
+                    if (ex != null) {
+                        responseObserver.onError(toGrpcException(ex));
+                    } else {
+                        responseObserver.onNext(ReplaceNodeResponse.getDefaultInstance());
                         responseObserver.onCompleted();
                     }
                 });
