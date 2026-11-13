@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: benchmark-weekly
@@ -577,15 +577,6 @@ jobs:
 
           python3 gen_dashboard.py benchmark-result.json "$GITHUB_SHA"
 
-      - name: Deploy dashboard to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./dashboard
-          user_name: 'github-actions[bot]'
-          user_email: '41898282+github-actions[bot]@users.noreply.github.com'
-          force_orphan: true
-
       - name: Upload benchmark results
         if: always()
         uses: actions/upload-artifact@v4
@@ -597,5 +588,6 @@ jobs:
             propose-result.json
             read-result.json
             capacity-result.json
+            dashboard/
           retention-days: 30
           if-no-files-found: ignore
