@@ -450,7 +450,7 @@
                              (raft-tests) silently skipped the aggregate upload,
                              so the job went green but uploaded nothing. -->
                         <artifactId>central-publishing-maven-plugin</artifactId>
-                        <version>0.10.0</version>
+                        <version>0.11.0</version>
                         <extensions>true</extensions>
                         <configuration>
                             <publishingServerId>central</publishingServerId>
